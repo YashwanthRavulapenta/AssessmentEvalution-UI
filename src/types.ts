@@ -36,3 +36,28 @@ export interface EvaluationStatus {
   result: EvaluationResult | null;
   error: string | null;
 }
+
+export interface StudentUpload {
+  className: string;
+  rollNo: string;
+  subject: string;
+}
+
+export interface BulkStudentResult extends StudentUpload {
+  evaluationId: string;
+  fileName: string;
+  status: string;
+  stage: string;
+  totalMarks: number | null;
+  maximumMarks: number | null;
+  error: string | null;
+  result: EvaluationResult | null;
+}
+
+export interface BulkEvaluation {
+  batchId: string;
+  createdAt: string;
+  approved: boolean;
+  status: string;
+  students: BulkStudentResult[];
+}

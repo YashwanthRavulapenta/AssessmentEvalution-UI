@@ -1,25 +1,43 @@
-import { CheckCircle2, Info, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Info, X } from "lucide-react";
 import type { EvaluationResult } from "../types";
 
 interface Props {
   result: EvaluationResult;
-  onMarks: (index: number, value: number) => void;
-  onFeedback: (index: number, value: string) => void;
+  className: string;
+  rollNo: string;
+  subject: string;
+  currentIndex: number;
+  studentCount: number;
+  canNavigatePrevious: boolean;
+  canNavigateNext: boolean;
   finalized: boolean;
   finalizing: boolean;
   error: string;
+  onMarks: (questionIndex: number, value: number) => void;
   onFinalize: () => void;
+  onDiscardApproval: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
   onClose: () => void;
 }
 
 export function ResultsReview({
   result,
-  onMarks,
-  onFeedback,
+  className,
+  rollNo,
+  subject,
+  currentIndex,
+  studentCount,
+  canNavigatePrevious,
+  canNavigateNext,
   finalized,
   finalizing,
   error,
+  onMarks,
   onFinalize,
+  onDiscardApproval,
+  onPrevious,
+  onNext,
   onClose,
 }: Props) {
   const total = result.questions.reduce(
@@ -35,12 +53,18 @@ export function ResultsReview({
     <section className="results-section">
       <div className="results-head">
         <div>
-          <div className="eyebrow">AI EVALUATION COMPLETE</div>
-          <h2 id="marks-dialog-title">Question-wise marks review</h2>
-          <p>{result.summary}</p>
+          <div className="eyebrow">
+            STUDENT {currentIndex + 1} OF {studentCount}
+          </div>
+          <h2 id="marks-dialog-title">Review student answers</h2>
+          <p>
+            {className && `${className} · `}
+            Roll {rollNo}
+            {subject && ` · ${subject}`}
+          </p>
         </div>
         <div className="total-score">
-          <span>{finalized ? "Final score" : "Suggested score"}</span>
+          <span>{finalized ? "Approved score" : "Suggested score"}</span>
           <strong>
             {total}
             <small> / {max}</small>
@@ -49,16 +73,12 @@ export function ResultsReview({
         <button
           className="icon-btn results-close"
           onClick={onClose}
-          aria-label="Close marks review"
+          aria-label="Cancel review and return to student list"
         >
           <X size={20} />
         </button>
       </div>
 
-      <div className="review-notice">
-        <Info size={16} /> AI marks are suggestions. Verify the recognized
-        handwriting and edit marks before finalizing.
-      </div>
       {error && (
         <div className="error" role="alert">
           {error}
@@ -78,24 +98,19 @@ export function ResultsReview({
               <span>{question.section}</span>
             </div>
             <div className="answer-grid">
-              <div>
-                <label>Recognized student answer</label>
+              <div className="student-answer">
+                <label>Student answer</label>
                 <p>{question.recognizedAnswer || "No answer recognized"}</p>
               </div>
-              <div>
-                <label>Master answer / expected response</label>
-                <p>{question.expectedAnswer}</p>
+              <div className="master-answer">
+                <label>Master answer</label>
+                <p>{question.expectedAnswer || "No expected answer provided"}</p>
               </div>
             </div>
             <div className="question-footer">
-              <label className="feedback-editor">
-                <span>Teacher feedback</span>
-                <textarea
-                  value={question.feedback}
-                  disabled={finalized}
-                  onChange={(event) => onFeedback(index, event.target.value)}
-                />
-              </label>
+              <span className="ai-mark">
+                AI suggested {question.aiSuggestedMarks} / {question.maxMarks}
+              </span>
               <label className="mark-editor">
                 <span>Teacher marks</span>
                 <input
@@ -110,52 +125,43 @@ export function ResultsReview({
                       index,
                       Math.max(
                         0,
-                        Math.min(
-                          question.maxMarks,
-                          Number(event.target.value),
-                        ),
+                        Math.min(question.maxMarks, Number(event.target.value)),
                       ),
                     )
                   }
                 />
-                <small>
-                  AI suggested {question.aiSuggestedMarks} / {question.maxMarks}
-                </small>
+                <small>/ {question.maxMarks}</small>
               </label>
             </div>
           </article>
         ))}
       </div>
 
+
       <div className="publish-row">
         <div>
-          <strong>Teacher approval required</strong>
+          <strong>{finalized ? "Student marks approved" : "Teacher approval required"}</strong>
           <span>
             {finalized
-              ? "These teacher-approved marks are finalized."
-              : "Review answers, edit marks and feedback, then finalize."}
+              ? "Discard this approval to edit the score and approve it again."
+              : "Approve this student's marks after checking the answers."}
           </span>
         </div>
         <button
-          className="primary-btn"
-          onClick={onFinalize}
-          disabled={finalized || finalizing}
+          className={finalized ? "danger-btn" : "primary-btn"}
+          onClick={finalized ? onDiscardApproval : onFinalize}
+          disabled={finalizing}
         >
           {finalized ? (
-            <>
-              <CheckCircle2 size={17} /> Finalized
-            </>
+            <>{finalizing ? "Reopening marks…" : "Discard approval & edit"}</>
           ) : (
-            <>{finalizing ? "Saving approved marks…" : "Approve & finalize marks"}</>
+            <>
+              {finalizing ? "Saving marks…" : "Approve student marks"}
+              {!finalizing && <CheckCircle2 size={17} />}
+            </>
           )}
         </button>
       </div>
-      {finalized && (
-        <div className="published-note">
-          <CheckCircle2 size={17} /> Teacher-approved marks are saved for this
-          evaluation. Student-dashboard publishing requires your LMS integration.
-        </div>
-      )}
     </section>
   );
 }

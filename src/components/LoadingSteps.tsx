@@ -1,13 +1,20 @@
 interface Props {
   preparingPhotos?: boolean;
   stage?: string;
+  title?: string;
+  cancelDisabled?: boolean;
+  error?: string;
+  onCancel?: () => void;
 }
 
 export function LoadingSteps({
   preparingPhotos = false,
   stage = "Waiting for an evaluation worker",
+  title,
+  cancelDisabled = false,
+  error = "",
+  onCancel,
 }: Props) {
-
   return (
     <div className="evaluation-overlay" role="status" aria-live="polite">
       <div className="evaluation-loader">
@@ -15,9 +22,10 @@ export function LoadingSteps({
           <div className="loader-orbit-core" />
         </div>
         <h2>
-          {preparingPhotos
-            ? "Preparing your photos"
-            : "Evaluating your answer sheet"}
+          {title ??
+            (preparingPhotos
+              ? "Preparing your photos"
+              : "Evaluating your answer sheet")}
         </h2>
         <div
           className="loader-stage"
@@ -33,6 +41,17 @@ export function LoadingSteps({
         <div className="loader-shimmer" aria-hidden="true">
           <span />
         </div>
+        {error && <div className="loader-error" role="alert">{error}</div>}
+        {onCancel && (
+          <button
+            className="loader-cancel"
+            type="button"
+            disabled={cancelDisabled}
+            onClick={onCancel}
+          >
+            {cancelDisabled ? "Cancelling evaluation…" : "Cancel evaluation"}
+          </button>
+        )}
       </div>
     </div>
   );
