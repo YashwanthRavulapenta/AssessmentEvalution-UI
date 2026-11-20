@@ -43,6 +43,8 @@ export interface StudentUpload {
   subject: string;
 }
 
+export type AssessmentType = "FA-1" | "SA-1" | "FA-2" | "SA-2" | "GA";
+
 export interface BulkStudentResult extends StudentUpload {
   evaluationId: string;
   fileName: string;
@@ -57,6 +59,7 @@ export interface BulkStudentResult extends StudentUpload {
 export interface BulkEvaluation {
   batchId: string;
   createdAt: string;
+  assessmentType?: AssessmentType;
   approved: boolean;
   status: string;
   students: BulkStudentResult[];

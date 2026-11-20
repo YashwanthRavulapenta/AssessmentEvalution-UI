@@ -3,8 +3,6 @@ import {
   BookOpenCheck,
   CheckCircle2,
   Download,
-  Moon,
-  Sun,
   Trash2,
   UsersRound,
 } from "lucide-react";
@@ -30,6 +28,7 @@ import {
 import type {
   BulkEvaluation,
   BulkStudentResult,
+  AssessmentType,
   EvaluationResult,
   MasterKeySummary,
   StudentUpload,
@@ -38,6 +37,11 @@ import type {
 const MAX_PDF_SIZE = 14 * 1024 * 1024;
 const MAX_BATCH_SIZE = 149 * 1024 * 1024;
 const MAX_STUDENTS = 60;
+const ASSESSMENT_TYPES: AssessmentType[] = ["FA-1", "SA-1", "FA-2", "SA-2", "GA"];
+
+function parseAssessmentType(value: string): AssessmentType | "" {
+  return ASSESSMENT_TYPES.find((type) => type === value) ?? "";
+}
 
 interface StudentPaper extends BulkStudentResult {
   localId: string;
@@ -63,7 +67,7 @@ function getStudentDetails(file: File): StudentUpload {
   };
 }
 
-function createMarksReport(students: StudentPaper[]) {
+function createMarksReport(students: StudentPaper[], assessmentType: AssessmentType) {
   const approvedStudents = students.filter(
     (student) => student.status === "finalized" && student.result,
   );
@@ -101,7 +105,7 @@ function createMarksReport(students: StudentPaper[]) {
 
   groups.forEach((groupStudents, group) => {
     const [className, subject] = group.split("|");
-    const title = `${className} - ${subject}`;
+    const title = `${className} - ${subject} - ${assessmentType}`;
     drawGroupHeader(title, y > 20);
 
     groupStudents.forEach((student) => {
@@ -119,7 +123,7 @@ function createMarksReport(students: StudentPaper[]) {
   });
 
   const firstStudent = approvedStudents[0];
-  const reportName = [firstStudent?.className, firstStudent?.subject]
+  const reportName = [firstStudent?.className, firstStudent?.subject, assessmentType]
     .filter(Boolean)
     .join("-")
     .replace(/[^a-z0-9-]+/gi, "-");
@@ -133,10 +137,12 @@ export function AssessmentEvaluationPage() {
   const [masterKeyId, setMasterKeyId] = useState("");
   const [savingMaster, setSavingMaster] = useState(false);
   const [masterImportStage, setMasterImportStage] = useState("");
+  const [assessmentType, setAssessmentType] = useState<AssessmentType | "">("");
   const [students, setStudents] = useState<StudentPaper[]>([]);
   const [batchId, setBatchId] = useState("");
   const [batchStatus, setBatchStatus] = useState("");
   const [batchApproved, setBatchApproved] = useState(false);
+  const [batchCancelled, setBatchCancelled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [evaluationStage, setEvaluationStage] = useState("");
   const [approvingBatch, setApprovingBatch] = useState(false);
@@ -146,8 +152,8 @@ export function AssessmentEvaluationPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
-  const [darkTheme, setDarkTheme] = useState(false);
   const reviewDialogRef = useRef<HTMLDialogElement>(null);
+  const cancelRequestedRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -187,7 +193,8 @@ export function AssessmentEvaluationPage() {
   }, [reviewIndex]);
 
   const selectedMasterKey = masterKeys.find((key) => key.id === masterKeyId);
-  const canFinalizeAll = students.length > 0 && students.every(
+  const isBatchCancelled = batchCancelled || batchStatus === "cancelled";
+  const canFinalizeAll = !isBatchCancelled && students.length > 0 && students.every(
     (student) =>
       Boolean(student.result) &&
       (student.status === "completed" || student.status === "finalized"),
@@ -205,6 +212,9 @@ export function AssessmentEvaluationPage() {
     setBatchId("");
     setBatchStatus("");
     setBatchApproved(false);
+    setBatchCancelled(false);
+    setAssessmentType("");
+    cancelRequestedRef.current = false;
     setReviewIndex(null);
     setError("");
     setNotice("");
@@ -235,6 +245,10 @@ export function AssessmentEvaluationPage() {
 
   function selectStudentFolder(files: FileList | null) {
     if (!files?.length) return;
+    if (!assessmentType) {
+      setError("Choose an assessment type before selecting the student folder.");
+      return;
+    }
     const selectedFiles = Array.from(files);
     const pdfFiles = selectedFiles.filter(
       (file) =>
@@ -280,6 +294,7 @@ export function AssessmentEvaluationPage() {
     setBatchId("");
     setBatchStatus("");
     setBatchApproved(false);
+    setBatchCancelled(false);
     setReviewIndex(null);
     setError("");
     setNotice("");
@@ -296,6 +311,9 @@ export function AssessmentEvaluationPage() {
   function applyBatchResponse(snapshot: BulkEvaluation) {
     setBatchStatus(snapshot.status);
     setBatchApproved(snapshot.approved);
+    setBatchCancelled(snapshot.status === "cancelled");
+    const snapshotAssessmentType = parseAssessmentType(snapshot.assessmentType ?? "");
+    if (snapshotAssessmentType) setAssessmentType(snapshotAssessmentType);
     setStudents((current) =>
       current.map((student, index) => {
         const remote = snapshot.students[index];
@@ -346,7 +364,7 @@ export function AssessmentEvaluationPage() {
   }
 
   async function runEvaluation() {
-    if (!masterKeyId || students.length === 0 || busy || savingMaster) return;
+    if (!masterKeyId || !assessmentType || students.length === 0 || busy || savingMaster) return;
     const missingIdentity = students.find(
       (student) => !student.rollNo.trim() || !student.subject.trim(),
     );
@@ -371,6 +389,8 @@ export function AssessmentEvaluationPage() {
     }
 
     setBusy(true);
+    cancelRequestedRef.current = false;
+    setBatchCancelled(false);
     setEvaluationStage("Uploading student PDFs");
     setError("");
     setBatchStatus("processing");
@@ -385,14 +405,17 @@ export function AssessmentEvaluationPage() {
     );
 
     try {
-      const createdBatchId = await startBulkEvaluation(masterKeyId, students);
+      const createdBatchId = await startBulkEvaluation(masterKeyId, assessmentType, students);
       setBatchId(createdBatchId);
       const delay = (milliseconds: number) =>
         new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
       while (true) {
+        if (cancelRequestedRef.current) break;
         await delay(1200);
+        if (cancelRequestedRef.current) break;
         const snapshot = await getBulkEvaluation(createdBatchId);
+        if (cancelRequestedRef.current) break;
         applyBatchResponse(snapshot);
         if (snapshot.status !== "processing") break;
         const finishedCount = snapshot.students.filter(
@@ -403,12 +426,14 @@ export function AssessmentEvaluationPage() {
         );
       }
     } catch (evaluationError) {
-      setError(
-        evaluationError instanceof Error
-          ? evaluationError.message
-          : "Bulk evaluation failed. Check the .NET API.",
-      );
-      setBatchStatus("failed");
+      if (!cancelRequestedRef.current) {
+        setError(
+          evaluationError instanceof Error
+            ? evaluationError.message
+            : "Bulk evaluation failed. Check the .NET API.",
+        );
+        setBatchStatus("failed");
+      }
     } finally {
       setBusy(false);
     }
@@ -525,7 +550,7 @@ export function AssessmentEvaluationPage() {
   }
 
   async function finalizeAllStudents() {
-    if (!batchId || !canFinalizeAll || batchIsReady || finalizingAll) return;
+    if (!batchId || isBatchCancelled || !canFinalizeAll || batchIsReady || finalizingAll) return;
 
     setFinalizingAll(true);
     setError("");
@@ -544,7 +569,7 @@ export function AssessmentEvaluationPage() {
   }
 
   async function approveBatch() {
-    if (!batchId || batchApproved || !batchIsReady || approvingBatch) return;
+    if (!batchId || isBatchCancelled || batchApproved || !batchIsReady || approvingBatch) return;
     setApprovingBatch(true);
     setError("");
     try {
@@ -563,24 +588,39 @@ export function AssessmentEvaluationPage() {
 
   function downloadMarksReport() {
     setError("");
-    if (!batchApproved || !createMarksReport(students)) {
+    if (!assessmentType || !batchApproved || !createMarksReport(students, assessmentType)) {
       setError("The PDF is available only after every student is finalized and the class is approved.");
     }
   }
 
   async function cancelEvaluation() {
     if (!batchId || cancelingBatch) return;
+    cancelRequestedRef.current = true;
+    setBatchCancelled(true);
+    setBatchApproved(false);
+    setBatchStatus("cancelled");
+    setStudents((current) =>
+      current.map((student) =>
+        student.status === "queued" || student.status === "running" || student.status === "cancelling"
+          ? {
+              ...student,
+              status: "cancelled",
+              stage: "Cancelled by teacher",
+              error: "Cancelled by teacher.",
+            }
+          : student,
+      ),
+    );
     setCancelingBatch(true);
     setError("");
     try {
-      const snapshot = await cancelBulkEvaluation(batchId);
-      applyBatchResponse(snapshot);
+      await cancelBulkEvaluation(batchId);
       setEvaluationStage("Stopping active student evaluations");
     } catch (cancelError) {
       setError(
         cancelError instanceof Error
-          ? cancelError.message
-          : "Could not cancel the student evaluations.",
+          ? `${cancelError.message} The batch is locked in this screen; restart serverDotnet if the running server does not support cancellation.`
+          : "Could not cancel the student evaluations. The batch is locked in this screen.",
       );
     } finally {
       setCancelingBatch(false);
@@ -627,10 +667,8 @@ export function AssessmentEvaluationPage() {
     }
   }
 
-  const theme = darkTheme ? "dark" : "light";
-
   return (
-    <main className="app" data-theme={theme}>
+    <main className="app">
       <header className="topbar">
         <a className="brand" href="#" aria-label="RiddleWings home">
           <div className="brand-logo">
@@ -638,14 +676,6 @@ export function AssessmentEvaluationPage() {
           </div>
           <strong>RiddleWings</strong>
         </a>
-        <button
-          className="theme-toggle"
-          onClick={() => setDarkTheme((current) => !current)}
-          aria-label={`Switch to ${darkTheme ? "light" : "dark"} theme`}
-        >
-          {darkTheme ? <Sun size={17} /> : <Moon size={17} />}
-          {darkTheme ? "Light theme" : "Dark theme"}
-        </button>
       </header>
 
       <div className="content">
@@ -655,22 +685,7 @@ export function AssessmentEvaluationPage() {
 
         <div className="upload-grid">
           <div className="upload-column">
-            <PdfUpload
-              kind="master"
-              title="Master answer key"
-              file={master}
-              selectedLabel={master ? undefined : selectedMasterKey?.fileName}
-              disabled={busy || savingMaster}
-              onPdf={saveAnswerKey}
-              onImages={() => {}}
-              onRemove={() => {
-                setMaster(null);
-                setMasterKeyId("");
-                window.localStorage.removeItem("riddlewings.masterKeyId");
-                resetBatch();
-              }}
-            />
-            {masterKeys.length > 0 && (
+                        {masterKeys.length > 0 && (
               <label className="master-key-choice">
                 <span>Use a saved answer key</span>
                 <select
@@ -695,6 +710,21 @@ export function AssessmentEvaluationPage() {
                 </select>
               </label>
             )}
+            <PdfUpload
+              kind="master"
+              title="Master answer key"
+              file={master}
+              selectedLabel={master ? undefined : selectedMasterKey?.fileName}
+              disabled={busy || savingMaster}
+              onPdf={saveAnswerKey}
+              onImages={() => {}}
+              onRemove={() => {
+                setMaster(null);
+                setMasterKeyId("");
+                window.localStorage.removeItem("riddlewings.masterKeyId");
+                resetBatch();
+              }}
+            />
             {savingMaster && (
               <div className="key-saving" role="status">
                 {masterImportStage}
@@ -702,33 +732,55 @@ export function AssessmentEvaluationPage() {
             )}
           </div>
 
-          <section className="upload-card folder-card">
-            <div className="upload-head">
-              <div className="upload-icon">
-                <UsersRound size={20} />
+          <div className="upload-column">
+            <label className="assessment-type-choice">
+              <span>Assessment type</span>
+              <select
+                value={assessmentType}
+                disabled={busy || savingMaster || students.length > 0}
+                onChange={(event) => {
+                  setAssessmentType(parseAssessmentType(event.currentTarget.value));
+                  setError("");
+                }}
+              >
+                <option value="">Choose an assessment type</option>
+                {ASSESSMENT_TYPES.map((type) => (
+                  <option value={type} key={type}>{type}</option>
+                ))}
+              </select>
+            </label>
+            <section className="upload-card folder-card">
+              <div className="upload-head">
+                <div className="upload-icon">
+                  <UsersRound size={20} />
+                </div>
+                <h2>Student answers folder</h2>
               </div>
-              <h2>Student answers folder</h2>
-            </div>
-            <div className="drop-area">
-              <UsersRound size={25} />
-              <span>Select the folder containing student PDFs</span>
-              <label className="file-picker">
-                Choose folder
-                <input
-                  className="file-input"
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  multiple
-                  disabled={busy || savingMaster || Boolean(batchId)}
-                  {...{ webkitdirectory: "" }}
-                  onChange={(event) => {
-                    selectStudentFolder(event.currentTarget.files);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </label>
-            </div>
-          </section>
+              <div className="drop-area">
+                <UsersRound size={25} />
+                <span>
+                  {assessmentType
+                    ? `Select the student PDFs for ${assessmentType}`
+                    : "Choose an assessment type to enable folder upload"}
+                </span>
+                <label className={`file-picker ${!assessmentType ? "is-disabled" : ""}`}>
+                  {assessmentType ? "Choose folder" : "Select type first"}
+                  <input
+                    className="file-input"
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    multiple
+                    disabled={!assessmentType || busy || savingMaster || Boolean(batchId)}
+                    {...{ webkitdirectory: "" }}
+                    onChange={(event) => {
+                      selectStudentFolder(event.currentTarget.files);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
+          </div>
         </div>
 
         {error && <div className="error" role="alert">{error}</div>}
@@ -878,7 +930,7 @@ export function AssessmentEvaluationPage() {
                 {batchId && !batchApproved && (
                   <button
                     className="primary-btn"
-                    disabled={!batchIsReady || busy || approvingBatch}
+                    disabled={isBatchCancelled || !batchIsReady || busy || approvingBatch}
                     onClick={approveBatch}
                   >
                     {approvingBatch ? "Approving class…" : "Approve class marks"}
@@ -887,7 +939,7 @@ export function AssessmentEvaluationPage() {
                 {batchApproved && (
                   <button
                     className="primary-btn"
-                    disabled={!students.length || students.some(
+                    disabled={isBatchCancelled || !students.length || students.some(
                       (student) => student.status !== "finalized" || !student.result,
                     )}
                     onClick={downloadMarksReport}

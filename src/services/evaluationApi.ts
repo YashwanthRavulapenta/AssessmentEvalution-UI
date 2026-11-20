@@ -4,6 +4,7 @@ import type {
   BulkEvaluation,
   MasterKeySummary,
   StudentUpload,
+  AssessmentType,
 } from "../types";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4001/api";
@@ -136,10 +137,12 @@ export async function evaluatePapers(
 
 export async function startBulkEvaluation(
   masterKeyId: string,
+  assessmentType: AssessmentType,
   students: Array<StudentUpload & { file: File }>,
 ): Promise<string> {
   const form = new FormData();
   form.append("masterKeyId", masterKeyId);
+  form.append("assessmentType", assessmentType);
   form.append(
     "studentDetails",
     JSON.stringify(
